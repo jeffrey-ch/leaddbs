@@ -2,11 +2,9 @@ name: leaddbs
 
 channels:
   - conda-forge
+  - defaults
 
 dependencies:
-  - heudiconv
-  - dcm2niix
-  - python=3.10
-
-variables:
-  env_version: 20231108
+  - python=3.8
+  - conda-forge::heudiconv
+  - conda-forge::dcm2niix
