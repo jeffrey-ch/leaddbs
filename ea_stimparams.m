@@ -142,7 +142,7 @@ if strcmp(options.leadprod, 'dbs')
         funcs = funcs(cell2mat(supportDirected));
         names = names(cell2mat(supportDirected));
     end
-    if ~options.prefs.env.dev || ~ismember(options.elmodel,ea_ossdbs_elmodel)
+    if ~ismember(options.elmodel,ea_ossdbs_elmodel)
         ossdbsInd = find(contains(names,'OSS-DBS'));
         funcs(ossdbsInd) = [];
         names(ossdbsInd) = [];
@@ -1136,7 +1136,7 @@ for el = 1:length(elstruct)
         else
             options.stimSetMode = 0;
         end
-        if options.prefs.machine.vatsettings.butenko_calcAxonActivation
+        if options.prefs.machine.vatsettings.butenko_calcPAM
             feval(ea_genvat,getappdata(handles.stimfig,'S'),options,handles.stimfig);
             ea_busyaction('off',handles.stimfig,'stim');
             return;
@@ -2411,7 +2411,7 @@ switch model
         ea_enable_vas(handles,options);
         set(handles.betawarning,'visible','on');
         set(handles.settings,'visible','on');
-        set(handles.addStimSet,'visible','on');
+        set(handles.addStimSet,'visible','off');
 
 end
 S.model=model;
@@ -3469,7 +3469,13 @@ switch model
     case 'Fastfield (Baniasadi 2020)'
         ea_vatsettings_fastfield;
     case 'OSS-DBS (Butenko 2020)'
-        ea_vatsettings_butenko;
+        all_params = getappdata(handles.stimfig);
+        if all_params.groupmode
+            stim_folder = 'None';
+        else
+            stim_folder = [all_params.options.root,all_params.options.patientname,filesep,'stimulations/',ea_nt(all_params.options.native),all_params.stimlabel];
+        end
+        ea_vatsettings_butenko(stim_folder);
 end
 
 
