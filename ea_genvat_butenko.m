@@ -21,11 +21,9 @@ elseif nargin==1 && ischar(varargin{1}) % return name of method.
     return
 end
 
-env = ea_conda_env('OSS-DBSv2');
 % Check OSS-DBS installation, set env
-if ~options.prefs.machine.vatsettings.oss_dbs.installed || ~env.is_created
-    ea_checkOSSDBSInstallv2;
-end
+env = ea_conda_env('OSS-DBSv2');
+ea_checkOSSDBSInstallv2(env);
 
 binPath = getenv('PATH'); % Current PATH
 if isunix
@@ -68,10 +66,10 @@ end
 %% Set MRI_data_name
 % Segment MRI
 segmaskName = 'segmask.nii';
+anchorImage = options.subj.preopAnat.(options.subj.AnchorModality).coreg;
 switch settings.butenko_segmAlg
     case 'SPM'
         if options.native
-            anchorImage = options.subj.preopAnat.(options.subj.AnchorModality).coreg;
             [anchorImageDir, anchorImageName] = fileparts(anchorImage);
             anchorImageDir = [anchorImageDir, filesep];
             anchorImageName = [anchorImageName, '.nii'];
@@ -302,7 +300,11 @@ for i=1:eleNum
             settings.Second_coordinate(i,:) = markersMNI(i).tail;
         end
     elseif ~isempty(coords_mm{i})
-        settings.Second_coordinate(i,:) = coords_mm{i}(end,:);
+        if contains(options.elmodel, 'DIXI D08')
+            settings.Second_coordinate(i,:) = coords_mm{i}(4,:);
+        else
+            settings.Second_coordinate(i,:) = coords_mm{i}(end,:);
+        end
     end
 end
 
@@ -312,6 +314,13 @@ settings.stimSetMode = options.stimSetMode;
 if settings.stimSetMode
     ea_warndlg("Not yet supported in V2")
     return
+end
+
+% if right electrode only, insert null Stim Protocol for the left
+% this work around is not needed for the left only, handled by Lead-DBS
+if eleNum == 1
+    S = ea_add_StimVector_to_S(S, zeros(1, conNum),1);
+    eleNum = 2;
 end
 
 % Initialize current control flag
@@ -477,12 +486,10 @@ if settings.calcAxonActivation
     end
 end
 
-% Interactive mode setting
-settings.interactiveMode = options.prefs.machine.vatsettings.butenko_interactive;
-
 %% Save settings for OSS-DBS
-parameterFile = [outputDir, filesep, 'oss-dbs_parameters.mat'];
+parameterFile = fullfile(outputDir, 'oss-dbs_parameters.mat');
 save(parameterFile, 'settings', '-v7.3');
+ea_savestimulation(S,options);
 
 % Delete previous results from stimSetMode
 ea_delete([outputDir, filesep, 'Result_StimProt_*']);
@@ -523,18 +530,6 @@ end
 runStatus = [0 0]; % Succeed or not
 stimparams = struct();
 for side=0:1
-%     % Stop and Remove running docker container on start
-%     if isempty(getenv('SINGULARITY_NAME')) % Only do it when using docker
-%         [~, containerID] = system(['docker ps -qf ancestor=', dockerImage]);
-%         if ~isempty(containerID)
-%             containerID = strsplit(strip(containerID));
-%             fprintf('\nStop running container...\n')
-%             cellfun(@(id) system(['docker stop ', id, newline]), containerID);
-%             % fprintf('\nClean up running container...\n')
-%             % cellfun(@(id) system(['docker rm ', id, newline]), containerID);
-%         end
-%     end
-
     switch side
         case 0
             sideLabel = 'R';
@@ -705,7 +700,7 @@ for side=0:1
                 ftr.fibers(:,4) = originalFibID;
 
                 if strcmp(settings.butenko_intersectStatus,'activated')
-                    ftr.fibers(ftr.fibers == -1 || ftr.fibers == -3,5) = 1;
+                    ftr.fibers(ftr.fibers(:,5) == -1 | ftr.fibers(:,5) == -3, 5) = 1;
                 elseif strcmp(settings.butenko_intersectStatus,'activated_at_active_contacts')
                     ftr.fibers = OSS_DBS_Damaged2Activated(settings,ftr.fibers,ftr.idx,side+1);
                 end
