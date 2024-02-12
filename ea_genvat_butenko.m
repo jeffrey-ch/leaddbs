@@ -225,8 +225,13 @@ if options.prefs.machine.vatsettings.butenko_useTensorData
         if exist('tensorDir', 'var')
             fprintf('Scaling tensor data...\n\n')
 
-            system(['python ', ea_getearoot, 'ext_libs/OSS-DBS/MRI_DTI_processing/Tensor_scaling.py ', tensorDir,filesep, tensorPrefix, tensorName, ' ', scalingMethod]);
 
+            system(['python ', ea_getearoot, 'ext_libs/OSS-DBS/MRI_DTI_processing/Tensor_scaling.py ', tensorDir,filesep, tensorPrefix, tensorName, ' ', scalingMethod]);
+            
+            if ~isfile([tensorDir, filesep, tensorPrefix, scaledTensorName])
+                disp('Parallel tensor scaling failed, trying a single thread...')
+                system(['python ', ea_getearoot, 'ext_libs/OSS-DBS/MRI_DTI_processing/Tensor_scaling_one_thread.py ', tensorDir,filesep, tensorPrefix, tensorName, ' ', scalingMethod]);
+            end
 
             % Copy scaled tensor data to stimulation directory, update setting
             copyfile([tensorDir, filesep, tensorPrefix, scaledTensorName], tensorData);
@@ -591,6 +596,11 @@ for side=0:1
         pathwayParameterFile = [outputDir,filesep, 'Allocated_axons_parameters.json'];
 
         system(['python ', ea_getearoot, 'ext_libs/OSS-DBS/Axon_Processing/PAM_caller.py ', neuron_folder, ' ', folder2save,' ', timeDomainSolution, ' ', pathwayParameterFile]);
+    end
+
+    % clean-up for outOfCore
+    if settings.outOfCore == 1
+        ea_delete([outputDir, filesep, 'Results_',sideCode,filesep,'oss_freq_domain_tmp_PAM.hdf5']);
     end
 
     % Check if OSS-DBS calculation is finished
