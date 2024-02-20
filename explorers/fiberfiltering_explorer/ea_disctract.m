@@ -3,6 +3,7 @@ classdef ea_disctract < handle
     % A. Horn
 
     properties (SetObservable)
+        fileformatversion; % 1.1 is current format
         M % content of lead group project
         resultfig % figure handle to plot results
         ID % name / ID of discriminative fibers object
@@ -13,16 +14,13 @@ classdef ea_disctract < handle
         connfibvisible = 0 % show all connected tracts in white
         showposamount = [25 25] % two entries for right and left
         shownegamount = [25 25] % two entries for right and left
-        connthreshold = 20
-        efieldthreshold = 200
-        statmetric = 'Correlations / E-fields (Irmen 2020)' % the following stat metric are available:
-        % ’Two-Sample T-Tests / VTAs (Baldermann 2019) / PAM (OSS-DBS)’
-        % ’One-Sample Tests / VTAs (Baldermann 2019) / PAM (OSS-DBS)’
-        % ‘Correlations / E-fields (Irmen 2020)’
-        % ‘Proportion Test (Chi-Square) / VTAs (binary vars)’
-        % ‘Binomial Tests / VTAs (binary vars)’
-        % ‘Reverse T-Tests / E-Fields (binary vars)’
-        % ‘Plain Connections’
+        statsettings = struct
+        connthreshold = nan % Legacy - in for compat reasons. Now initialized to Nan. Statsettings struct is used.
+        efieldthreshold = nan % Legacy - in for compat reasons. Now initialized to Nan. Statsettings struct is used.
+        statmetric = nan % Legacy - in for compat reasons. Now initialized to Nan. Statsettings struct is used.
+        SigmoidTransform = nan;  % Legacy. Now in statsettings.
+        twoSampleWeighted = nan;  % Legacy. Now in statsettings.
+        efieldmetric = nan % Legacy. Now in statsettings.
         threshstrategy = 'Percentage Relative to Peak'; % can be 'Relative to Amount' or 'Fixed Amount'
         multi_pathways = 0 % if structural connectome is devided into pathways (multiple .mat in dMRI_MultiTract)
         map_list % list that contains global indices of the first fibers in each pathway (relevant when multi_pathways = 1)
@@ -35,7 +33,6 @@ classdef ea_disctract < handle
         ADJ = false             % contains the large but sparse adjacency matrix
         adj_scaler = 0.025 % coefficient that determines the degree of smoothing. Atm, hardwired, but could adaptive
         corrtype = 'Spearman' % correlation strategy in case of statmetric ==  Correlations / E-fields (Irmen 2020). In case of one-sample tests used for 'T-Tests' vs 'Wicoxon Signed Rank Tests'.
-        efieldmetric = 'Peak' % if statmetric == ‘Correlations / E-fields (Irmen 2020)’, efieldmetric can calculate sum, mean or peak along tracts
         poscolor = [0.9176,0.2000,0.1373] % positive main color
         negcolor = [0.2824,0.6157,0.9725] % negative main color
         multitractmode = 'Single Tract Analysis' % multi mode now coded by this value
@@ -47,7 +44,7 @@ classdef ea_disctract < handle
         multcompstrategy = 'FDR'; % could be 'Bonferroni'
         subscore
         currentune
-        results
+        results = struct
         % Subfields:
         % results.(connectomename).fibcell: cell of all fibers connected, sorted by side
         % results.(connectomename).ttests.fibsval % connection status for each fiber to each VTA
@@ -98,12 +95,11 @@ classdef ea_disctract < handle
         Nsets = 5 % divide into N sets when doing Custom (random) set test
         adjustforgroups = 1 % adjust correlations for group effects
         kIter = 1;
-        roiintersectdata = {}; %roi, usually efield with which you can calculate fiber intersection 
+        roiintersectdata = {}; %roi, usually efield with which you can calculate fiber intersection
         roithresh = 200; %threshold above which efield metrics are considered
         % misc
         runwhite = 0; % flag to calculate connected tracts instead of stat tracts
-        SigmoidTransform = 0;  % flag to transform E-field to Sigmoids
-        twoSampleWeighted = 1;  % flag for two-sample weighted linear regression
+        
     end
 
     properties (Access = private)
@@ -120,7 +116,18 @@ classdef ea_disctract < handle
         end
 
         function initialize(obj,datapath,resultfig)
-
+            % statsettings
+            % initial hard threshold to impose on (absolute) nifti files only when calculating the data
+            obj.statsettings.doVoxels = 1;
+            obj.statsettings.doFibers = 1;
+            obj.statsettings.outcometype = 'gradual';
+            obj.statsettings.stimulationmodel = 'Electric Field';
+            obj.statsettings.efieldmetric = 'Peak'; % if statmetric == ;Correlations / E-fields (Irmen 2020)’, efieldmetric can calculate sum, mean or peak along tracts
+            obj.statsettings.efieldthreshold = 200;
+            obj.statsettings.connthreshold = 20;
+            obj.statsettings.statfamily = 'Correlations'; % the
+            obj.statsettings.stattest = 'Spearman';
+            obj.statsettings.H0 = 'Average';
             datapath = GetFullPath(datapath);
             D = load(datapath, '-mat');
             if isfield(D, 'M') % Lead Group analysis path loaded
@@ -167,6 +174,7 @@ classdef ea_disctract < handle
                 obj.subscore.splitbysubscore = 0;
                 obj.subscore.special_case = 0;
                 obj.covarlabels={};
+                obj.fileformatversion=1.1; % new current version with settings to harmonize stats.
             elseif  isfield(D, 'tractset')  % Saved tractset class loaded
                 props = properties(D.tractset);
                 for p =  1:length(props) %copy all public properties
@@ -180,6 +188,7 @@ classdef ea_disctract < handle
                 ea_error('You have opened a file of unknown type.')
                 return
             end
+
             obj.compat_statmetric; % check and resolve for old statmetric code (which used to be integers)
 
             addlistener(obj,'activateby','PostSet',@activatebychange);
@@ -214,9 +223,11 @@ classdef ea_disctract < handle
                         obj.statmetric='Weighted Linear Regression / EF-Sigmoid (Dembek 2023)';
                 end
             end
+            ea_discfibers_compat_statmetrics2statsettings(obj);
         end
-        function calculate(obj)
 
+
+        function calculate(obj)
             % check that this has not been calculated before:
             if ~isempty(obj.results) % something has been calculated
                 if isfield(obj.results,ea_conn2connid(obj.connectome))
@@ -242,7 +253,7 @@ classdef ea_disctract < handle
             % merged_pathways.mat
             if obj.use_adjacency
                 if obj.multi_pathways == 1
-                    connectome_folder = [ea_getconnectomebase('dMRI_multitract'), obj.connectome];
+                    connectome_folder = [ea_getconnectomebase('dMRI_MultiTract'), obj.connectome];
                     ADJ_connectome_path = [connectome_folder,filesep,'merged_pathways_ADJ.mat'];
                     obj.ADJ = load(ADJ_connectome_path); % but we need to precompute (ourselves!)
                 else
@@ -727,7 +738,7 @@ classdef ea_disctract < handle
                 end
             end
 
-            if obj.doactualprediction % repeat loops partly to fit to actual response variables:                
+            if obj.doactualprediction % repeat loops partly to fit to actual response variables:
                 Ihat_voters_prediction=nan(size(Ihat));
                 %add some warnings
                 switch obj.multitractmode
@@ -780,7 +791,7 @@ classdef ea_disctract < handle
                             covariates = [covariates,obj.covars{cv}(patientsel)];
 
                         end
-                        
+
                         if obj.useExternalModel == true %only use for single tract analysis
                             if ~strcmp(obj.multitractmode,'Single Tract Analysis')
                                 ea_error("Sorry, you cannot use exported model and fit-to-scores for multi-tract model");
@@ -1154,9 +1165,6 @@ classdef ea_disctract < handle
                         end
                     end
                 end
-
-
-
                 [vals,fibcell,usedidx]=ea_discfibers_loadModel_calcstats(obj, vals_connected);
             elseif ~exist('vals','var')
                 [vals,fibcell,usedidx]=ea_discfibers_calcstats(obj);
@@ -1353,6 +1361,7 @@ classdef ea_disctract < handle
                     continue;
                 else
                     allvals(isnan(allvals)) = 0;
+                    allvals(isinf(allvals)) = 0; % ignore infs for colormap generation.
                 end
 
                 if strcmp(obj.multitractmode,'Split & Color By Subscore') || strcmp(obj.multitractmode,'Split & Color By PCA')
@@ -1802,7 +1811,7 @@ for nroi = 1:length(obj.roiintersectdata)
                 end
             end
             normwts = normalize(ea_contrast(wts,10,0),'range');
-            
+
             normwts =  mat2cell(normwts,ones(size(normwts,1),1));
             if ~isempty(normwts)
                 [obj.drawobject{i,side}.FaceAlpha]=normwts{:};
