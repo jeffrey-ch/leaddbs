@@ -46,7 +46,6 @@ settings.removeElectrode = options.prefs.machine.vatsettings.butenko_removeElect
 settings.neuronModel = options.prefs.machine.vatsettings.butenko_axonModel;
 settings.signalType = options.prefs.machine.vatsettings.butenko_signalType;
 %settings.pulseWidth = options.prefs.machine.vatsettings.butenko_pulseWidth;
-settings.pulseWidth = [S.Rs1.pulseWidth;S.Ls1.pulseWidth];
 settings.biphasic = options.prefs.machine.vatsettings.butenko_biphasic;
 settings.butenko_tensorData = options.prefs.machine.vatsettings.butenko_tensorData;
 settings.AdaptiveRef = options.prefs.machine.vatsettings.butenko_AdaptiveRef;
@@ -429,7 +428,8 @@ for source_index = 1:4
     % Axon activation setting
     if settings.calcAxonActivation
         %settings.AxonModel = options.prefs.machine.vatsettings.butenko_AxonModel;
-    
+
+        settings.pulseWidth = [S.Rs1.pulseWidth;S.Ls1.pulseWidth];
         settings.connectome = options.prefs.machine.vatsettings.butenko_connectome;
         settings.axonLength = options.prefs.machine.vatsettings.butenko_axonLength;
         settings.fiberDiameter = options.prefs.machine.vatsettings.butenko_fiberDiameter;
@@ -547,6 +547,9 @@ for source_index = 1:4
             save([settings.connectomePath, filesep, 'data1.mat'], '-struct', 'data1', '-v7.3');
             save([settings.connectomePath, filesep, 'data2.mat'], '-struct', 'data2', '-v7.3');
         end
+    else
+        % for now, hardcode 60 us pw for all VATs
+        settings.pulseWidth = [60.0;60.0];
     end
     
     %% Save settings for OSS-DBS
@@ -670,6 +673,12 @@ for source_index = 1:4
             folder2save = [outputDir,filesep,'Results_', sideCode];
             timeDomainSolution = [outputDir,filesep,'Results_', sideCode, filesep, 'oss_time_result_PAM.h5'];
             pathwayParameterFile = [outputDir,filesep, 'Allocated_axons_parameters.json'];
+
+            % check if the time domain results is available
+            if ~isfile(timeDomainSolution)
+                ea_warndlg('OSS-DBS failed to prepare a time domain solution. If RAM consumption exceeded the hardware limit, set settings.outOfCore to 1')
+                return
+            end
     
             system(['python ', ea_getearoot, 'ext_libs/OSS-DBS/Axon_Processing/PAM_caller.py ', neuron_folder, ' ', folder2save,' ', timeDomainSolution, ' ', pathwayParameterFile]);
         end
