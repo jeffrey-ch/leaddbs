@@ -44,8 +44,14 @@ try
 end
 
 for side=options.sides
+   
+    if isempty(trajectory{side}) == 1
+        side = 2;
+    end
+
     try
         startpoint=trajectory{side}(1,:)-(2*(coords_mm{side}(1,:)-trajectory{side}(1,:)));
+        
     catch
         keyboard
     end

@@ -158,6 +158,7 @@ classdef ea_disctract < handle
                     obj.patientselection = obj.M.ui.listselect;
                 end
 
+                obj.responsevar = obj.M.clinical.vars{1};
                 obj.responsevarlabel = obj.M.clinical.labels{1};
                 obj.subscore.vars = {};
                 obj.subscore.labels = {};
@@ -294,10 +295,10 @@ classdef ea_disctract < handle
                     obj.results.(ea_conn2connid(obj.connectome)).totalFibers = totalFibers; % total number of fibers in the connectome to work with global indices
             end
 
-            obj.results.(ea_conn2connid(obj.connectome)).('spearman_sum').fibsval = fibsvalSum;
-            obj.results.(ea_conn2connid(obj.connectome)).('spearman_mean').fibsval = fibsvalMean;
-            obj.results.(ea_conn2connid(obj.connectome)).('spearman_peak').fibsval = fibsvalPeak;
-            obj.results.(ea_conn2connid(obj.connectome)).('spearman_5peak').fibsval = fibsval5Peak;
+            obj.results.(ea_conn2connid(obj.connectome)).('efield_sum').fibsval = fibsvalSum;
+            obj.results.(ea_conn2connid(obj.connectome)).('efield_mean').fibsval = fibsvalMean;
+            obj.results.(ea_conn2connid(obj.connectome)).('efield_peak').fibsval = fibsvalPeak;
+            obj.results.(ea_conn2connid(obj.connectome)).('efield_5peak').fibsval = fibsval5Peak;
             obj.results.(ea_conn2connid(obj.connectome)).('plainconn').fibsval = fibsvalBin;
             obj.results.(ea_conn2connid(obj.connectome)).fibcell = fibcell;
         end
@@ -314,10 +315,10 @@ classdef ea_disctract < handle
 
                 obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('ttests').fibsval = fibsvalBin;
                 obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('VAT_Ttest').fibsval = fibsvalBin; % should be used instead of ttests
-                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('spearman_sum').fibsval = fibsvalSum;
-                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('spearman_mean').fibsval = fibsvalMean;
-                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('spearman_peak').fibsval = fibsvalPeak;
-                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('spearman_5peak').fibsval = fibsval5Peak;
+                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('efield_sum').fibsval = fibsvalSum;
+                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('efield_mean').fibsval = fibsvalMean;
+                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('efield_peak').fibsval = fibsvalPeak;
+                obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('efield_5peak').fibsval = fibsval5Peak;
                 obj.cleartuneresults.(ea_conn2connid(obj.connectome)).('plainconn').fibsval = fibsvalBin;
                 obj.cleartuneresults.(ea_conn2connid(obj.connectome)).fibcell = fibcell;
             end
