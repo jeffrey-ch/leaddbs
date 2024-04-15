@@ -231,8 +231,8 @@ for source_index = 1:4
                 else
                     % instead of PAM_caller, we call optimization algorithm here
                     PAM_caller_script = [ea_getearoot, 'ext_libs/OSS-DBS/Axon_Processing/PAM_caller.py'];
-                    optim_settings_dict = [outputDir,filesep,'netblend_dict.json'];
-                    system(['python ', ea_getearoot, 'cleartune/PathwayTune/pam_optimizer.py ', PAM_caller_script, ' ', neuron_folder, ' ', optim_settings_dict, ' ', outputDir, ' ', num2str(side)])
+                    optim_settings_dict = [outputPaths.outputDir,filesep,'netblend_dict.json'];
+                    system(['python ', ea_getearoot, 'cleartune/PathwayTune/pam_optimizer.py ', PAM_caller_script, ' ', neuron_folder, ' ', optim_settings_dict, ' ', outputPaths.outputDir, ' ', num2str(side)])
 
                     %system(['python ', ea_getearoot, 'ext_libs/OSS-DBS/Axon_Processing/PAM_caller.py ', neuron_folder, ' ', folder2save,' ', timeDomainSolution, ' ', pathwayParameterFile]);
                 end
