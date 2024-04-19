@@ -14,7 +14,7 @@ if nargin==2
 elseif nargin==3
     S=varargin{1};
     options=varargin{2};
-    hFigure=varargin{3};
+    resultfig=varargin{3};
 elseif nargin==1 && ischar(varargin{1}) % return name of method.
     varargout{1} = 'OSS-DBS (Butenko 2020)';
     varargout{2} = true; % Support directed lead
@@ -51,6 +51,9 @@ settings.butenko_tensorData = options.prefs.machine.vatsettings.butenko_tensorDa
 settings.AdaptiveRef = options.prefs.machine.vatsettings.butenko_AdaptiveRef;
 settings.encapsulationType = options.prefs.machine.vatsettings.butenko_encapsulation;
 settings.outOfCore = 0;
+
+options.prefs.machine.vatsettings.butenko_useTensorData = 0;
+options.stimSetMode = 0;
 
 % Set output path
 subDescPrefix = ['sub-', options.subj.subjId, '_desc-'];
@@ -693,11 +696,7 @@ for source_index = 1:4
                 && ~isfile([outputDir, filesep, 'fail_', sideCode, '.txt'])
             continue;
         end
-    
-        % Get resultfig handle
-        if exist('hFigure', 'var')
-            resultfig = getappdata(hFigure,'resultfig');
-        end
+   
     
         if isfile([outputDir, filesep, 'success_', sideCode, '.txt'])
             runStatus(side+1) = 1;
