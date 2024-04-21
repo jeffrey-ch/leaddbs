@@ -32,7 +32,7 @@ settings = ea_prepare_ossdbs(options);
 prepFiles_cluster = 0; % set to 1 if you only want to prep files for cluster comp.
 true_VTA = 0; % set to 1 to compute classic VAT using axonal grids
 prob_PAM = 0; % set to 1 to compute PAM over an uncertain parameter (e.g. fiber diameter)
-settings.outOfCore = 0;  % set to 1 if RAM capacity is exceeded during PAM
+settings.outOfCore = 1;  % set to 1 if RAM capacity is exceeded during PAM
 
 if settings.stimSetMode
     ea_warndlg("Not yet supported in V2")
