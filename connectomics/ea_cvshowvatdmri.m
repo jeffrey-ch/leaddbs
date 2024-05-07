@@ -43,10 +43,15 @@ modelLabel = ea_simModel2Label(S.model);
 vatPrefix = [subPrefix, '_sim-binary_model-', modelLabel, '_hemi-'];
 
 % seed filename
-seedfile=cell(length(hemiTag),1);
-for v=1:length(hemiTag)
-    seedfile{v}=[directory,'stimulations',filesep,ea_nt(options),vsname,filesep,vatPrefix,hemiTag{options.sides(v)},'.nii'];
+seedfile=cell(length(options.sides),1);
+if length(options.sides) == 2
+    for v=1:length(hemiTag)
+        seedfile{v}=[directory,'stimulations',filesep,ea_nt(options),vsname,filesep,vatPrefix,hemiTag{options.sides(v)},'.nii'];
+    end
+else
+    seedfile{1}=[directory,'stimulations',filesep,ea_nt(options),vsname,filesep,vatPrefix,hemiTag{options.sides(1)},'.nii'];
 end
+
 
 targetsfile=[ea_space(options,'labeling'),selectedparc,'.nii'];
 

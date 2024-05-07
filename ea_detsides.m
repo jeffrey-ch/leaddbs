@@ -1,6 +1,9 @@
 function options = ea_detsides(options)
 
 if isfield(options.subj, 'recon') && isfile(options.subj.recon.recon)
+    if numel(fieldnames(options.subj)) > 1 
+        options.subj.recon.recon = [options.subj.reconDir '\sub-' options.subj.subjId '_desc-reconstruction.mat'];
+    end 
     load(options.subj.recon.recon, 'reco');
     sides = [];
     if isfield(reco,'native')

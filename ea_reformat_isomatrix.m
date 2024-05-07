@@ -16,13 +16,15 @@ if ~iscell(isom) % check if isomatrix is a cell ({[right_matrix]},{[left_matrix]
             stimmat{side}=init_isoMatrixMask(M.elstruct, side);
             stimmat{side}=bsxfun(@times,stimmat{side},isom);
         end
-    elseif size(isom,1) == length(M.patient.list) && size(isom,2) == length(options.sides)
-        % nx2 matrix (1 column for each hemisphere)
-        for iside=1:length(options.sides)
+
+elseif size(isom, 1) == length(M.patient.list) && size(isom, 2) == 2 % Assuming isom has two columns always
+    % 2 columns in isom (1 column for each hemisphere)
+    for iside=1:length(options.sides)
             side=options.sides(iside);
             stimmat{side}=init_isoMatrixMask(M.elstruct, side);
             stimmat{side}=bsxfun(@times,stimmat{side},isom(:,side));
-        end
+    end
+
     elseif size(isom,1) == length(M.patient.list) && ...
             (size(isom,2) == (get_maxNumContacts(M.elstruct)-1)*2 || size(isom,2) == get_maxNumContacts(M.elstruct)*2)
         % (1 value for each contact pair) or (1 value for each contact) * patientlist
