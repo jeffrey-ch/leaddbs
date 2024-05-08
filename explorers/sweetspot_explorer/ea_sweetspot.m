@@ -149,10 +149,14 @@ classdef ea_sweetspot < handle
 
             if ~isfield(obj.M,'pseudoM')
                 % get active coordinates, as well
-                for pt=1:length(obj.M.patient.list)
-                    for side=1:2
-                        obj.results.activecnt{side}(pt,:)=...
-                            mean(obj.M.elstruct(pt).coords_mm{side}(find(obj.M.S(pt).activecontacts{side}),:),1); %#ok<FNDSB> % find is necessary here
+                for pt = 1:length(obj.M.patient.list)
+                    for side = 1:2
+                        active_coords = obj.M.elstruct(pt).coords_mm{side}(find(obj.M.S(pt).activecontacts{side}), :); %#ok<FNDSB> % find is necessary here
+                        if ~isempty(active_coords) % Ensure there are active coordinates
+                            obj.results.activecnt{side}(pt, :) = mean(active_coords, 1); % Calculate mean
+                        else
+                            obj.results.activecnt{side}(pt, :) = nan(1, 3); % If no active coordinates, assign NaNs
+                        end
                     end
                 end
                 for side=1:2

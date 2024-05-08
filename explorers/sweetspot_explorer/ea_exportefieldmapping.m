@@ -7,6 +7,8 @@ ea_mkdir(outdir);
 % Copy bb template and re-crop it to match the input images
 copyfile([ea_space, 'bb.nii'], [outdir, 'bb_nan.nii']);
 allV = reshape(vatlist', [], 1);
+allV = allV(~cellfun(@isempty, allV)); % when concatenating list, remove NaNs/empty columns make redirection to nonsense
+
 bbox = ea_get_bbox(allV, tight=1);
 ea_crop_nii_bb([outdir, 'bb_nan.nii'], bbox);
 
@@ -56,17 +58,23 @@ end
 
 % now conform each VTA to space
 AllX=cell(size(vatlist,2),1);
-for vat=1:size(vatlist,1)
-    for side=1:size(vatlist,2)
-        copyfile(vatlist{vat,side},[outdir,'tmp_efield.nii']);
+for vat = 1:size(vatlist, 1)
+    for side = 1:size(vatlist, 2)
+        % Check if vatlist value is NaN or empty
+        if isempty(vatlist{vat, side})
+            % Skip processing for NaN or empty values
+            continue;
+        end
+        
+        copyfile(vatlist{vat, side}, [outdir,'tmp_efield.nii']);
         ea_conformspaceto([outdir,'efield_bb',sidesuffices{side},'.nii'], ...
             [outdir,'tmp_efield.nii'], 0);
-        nii=ea_load_nii([outdir,'tmp_efield.nii']);
+        nii = ea_load_nii([outdir,'tmp_efield.nii']);
 
-       if ~exist('AllX','var')
-          AllX{side}=zeros(size(vatlist,1),numel(nii.img));
-       end
-       AllX{side}(vat,:)=nii.img(:);
+        if ~exist('AllX', 'var')
+            AllX{side} = zeros(size(vatlist, 1), numel(nii.img));
+        end
+        AllX{side}(vat, :) = nii.img(:);
     end
 end
 ea_delete([outdir,'efield_bb.nii']);
