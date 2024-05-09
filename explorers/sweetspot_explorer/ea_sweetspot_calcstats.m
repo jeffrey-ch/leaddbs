@@ -21,6 +21,11 @@ if obj.mirrorsides
     I=[I;I];
 end
 
+% if size(I,2) == 2 % aka 1 variable per hemisphere
+%     start_row_index = ((size(I,1)/2)+1);
+%     I(start_row_index:end, :) = I(start_row_index:end, end:-1:1); % swap values of columns
+% end
+
 if ~isempty(obj.covars)
     for i=1:length(obj.covars)
         if obj.mirrorsides
@@ -75,6 +80,7 @@ for group=groups
                 Nmap=ea_nansum(gval{side}(gpatsel,:)>obj.efieldthreshold);
                 gval{side}(gpatsel,Nmap<round(length(gpatsel)*(obj.coverthreshold/100)))=nan; % Set pixels to Nan that do not meet coverthreshold criteria
         end
+
         switch obj.statlevel
             case 'VTAs'
                 % get amplitudes
@@ -134,7 +140,7 @@ for group=groups
                         I(gpatsel,side) = I(gpatsel,side) ./ amps(gpatsel,side);
                     case 'VTA Size'
                         I(gpatsel,side) = I(gpatsel,side) ./ VTAsize(gpatsel,side);
-                end
+                 end
 
                 %% perform statistical-tests / image creation
                 switch obj.stattest
