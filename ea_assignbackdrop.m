@@ -35,20 +35,11 @@ if strcmp(bdstring, 'list')
 
     % check if preop and postop images exist
     if ~nopatientmode
-        
-        if isfield(options.subj, 'preopAnat') && ...
-        isfield(options.subj.preopAnat, options.subj.AnchorModality) && ...
-        isfield(options.subj.preopAnat.(options.subj.AnchorModality), 'coreg')
-    
-            if ~isfile(options.subj.preopAnat.(options.subj.AnchorModality).coreg)
-                haspreop = 0;
-            end
-            
-            else
-                % Handle cases where options.subj.preopAnat or 
-                % options.subj.preopAnat.(options.subj.AnchorModality) doesn't exist
-                haspreop = 0;
-         end
+        if ~isfield(options.subj, 'preopAnat')
+            haspreop=0;
+        elseif ~isfile(options.subj.preopAnat.(options.subj.AnchorModality).coreg)
+            haspreop=0;
+        end
 
         if native
             if strcmp(options.subj.postopModality, 'MRI') && ~isfile(options.subj.postopAnat.ax_MRI.coreg)
