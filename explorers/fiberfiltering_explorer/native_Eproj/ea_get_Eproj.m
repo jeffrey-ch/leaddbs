@@ -10,6 +10,11 @@ arguments
     space          % space where to compute E-proj, 'MNI' or 'native'
 end
 
+if isempty(tractset.analysispath)
+    pth = fileparts(tractset.leadgroup);
+    tractset.analysispath=[pth,filesep,'fiberfiltering',filesep,tractset.ID,'.fibfilt'];
+end
+
 % use connectome with all pathways combined
 if tractset.multi_pathways == 1
     % check if merged_pathways is in fibfiltering folder
@@ -47,8 +52,9 @@ else
     end
 end
 
+ea_dispercent(1/size(tractset.M.patient.list,1),'Computing E-field metrics on fibers')
 for pt_i = 1:size(tractset.M.patient.list,1)
-
+    fprintf('\nProcessing: %s\n',tractset.M.patient.list{pt_i});
     stim_folder = strcat(tractset.M.patient.list{pt_i},filesep,'stimulations',stim_space);
 
     for side = 1:2
@@ -82,9 +88,8 @@ for pt_i = 1:size(tractset.M.patient.list,1)
             [~,pt_label,~] = fileparts(tractset.M.patient.list{pt_i});
             fprintf("Missing stimulation for %s, %s side \n",pt_label,side_suffix)
         end
-
-        disp("_______________________________")
     end
 
 end
+ea_dispercent(1/size(tractset.M.patient.list,1),'end')
 
