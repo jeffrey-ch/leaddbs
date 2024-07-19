@@ -116,6 +116,9 @@ class ResultPAM:
         # we can just check the distance for one activation profile across all simulated fibers
         self.activation_profile, self.sim_pathways = self.load_AP_from_OSSDBS(inters_as_stim)
 
+        for path_i in range(len(self.sim_pathways)):
+            print(self.sim_pathways[path_i],self.activation_profile[path_i])
+
         # activation_profile: Nx1 numpy.ndarray, percent activation for simulated pathways
         # sim_pathways: list, pathways simulated in OSS-DBS for this patient
 
@@ -305,6 +308,7 @@ class ResultPAM:
         SE_threshold_profile = copy.deepcopy(self.target_profiles['SE_dict'])
         SE_threshold_profile_side = {}
         for key in SE_threshold_profile:
+
             if self.side == 0 and not ("_rh" in key):
                 continue
             elif self.side == 1 and not ("_lh" in key):
@@ -331,7 +335,7 @@ class ResultPAM:
                     # print("Percent activation was not found for pathway ", activ_target_profile[i], "assigning null distance")
 
                 # check if above the threshold
-                if predicted_rates[-1] >= target_rates[-1]:
+                if predicted_rates[-1] > target_rates[-1]:
                     SE_threshold_profile_side[key]["predicted"] = 1
                     break
                 else:
@@ -485,9 +489,12 @@ class ResultPAM:
                                                                        score_symptom_metric)
 
         # also get symptom distances for 100% activation to estimate worst case scenario for soft-side effects
-        max_activation_profile = 100.0 * np.ones(self.activation_profile.shape[0])
+        max_activation_profile = np.ones(self.activation_profile.shape[0])
         [max_symp_dist, __, __] = self.get_symptom_distances(max_activation_profile, [],
                                                                       score_symptom_metric)
+
+        print("Distances ", symp_dist)
+        print("Max Distances", max_symp_dist)
 
         I_hat, estim_symp_improv_dict, symptom_labels_marked = self.get_improvement_from_distance(symp_dist,
                                                                                                  max_symp_dist,
@@ -659,7 +666,6 @@ class ResultPAM:
         # check critical side-effects if available
         if 'SE_dict' in self.target_profiles:
             self.SE_dict = self.check_for_side_effects(self.activation_profile)
-
 
 if __name__ == '__main__':
 
