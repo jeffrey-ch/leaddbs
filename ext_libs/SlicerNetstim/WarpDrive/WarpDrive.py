@@ -4,12 +4,13 @@ import logging
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
+import json
 
 import numpy as np
 
-from WarpDriveLib.Tools import NoneTool, SmudgeTool, DrawTool, PointToPointTool
+from WarpDriveLib.Tools import NoneTool, SmudgeTool, DrawTool, PointToPointTool, ShrinkExpandTool
 from WarpDriveLib.Helpers import GridNodeHelper, LeadDBSCall
-from WarpDriveLib.Widgets import Tables, Toolbar, Buttons
+from WarpDriveLib.Widgets import Tables, Toolbar
 
 #
 # WarpDrive
@@ -31,15 +32,29 @@ This module provides tools to manually fix misalignments after non linear regist
 """
     self.parent.helpText += self.getDefaultModuleDocumentationLink()  # TODO: verify that the default URL is correct or change it to the actual documentation
     self.parent.acknowledgementText = "" 
-    slicer.app.connect("startupCompleted()", setUpSliceNames)
 
-def setUpSliceNames():
-  if slicer.app.mainApplicationName == 'SlicerForLeadDBS':
-    for color,name in zip(['Red','Green','Yellow'],['Axial','Coronal','Sagittal']):
-      sliceWidget = slicer.app.layoutManager().sliceWidget(color)
-      if not sliceWidget:
-        continue
-      sliceWidget.mrmlSliceNode().SetName(name)
+    slicer.app.connect("startupCompleted()", registerSampleData)
+
+def registerSampleData():
+  """
+  Add data sets to Sample Data module.
+  """
+
+  try:
+    import SampleData
+  except:
+    return
+
+  SampleData.SampleDataLogic.registerCustomSampleDataSource(
+    category='WarpDrive',
+    sampleName='STN Refinement',
+    thumbnailFileName=os.path.join(os.path.dirname(__file__), 'Resources', 'Icons', 'WarpDrive1.png'),
+    uris="https://github.com/netstim/SlicerNetstim/releases/download/SampleData/WarpDrive_STN.mrb",
+    fileNames='WarpDrive_STN.mrb',
+    loadFiles=True,
+    loadFileType='SceneFile'
+  )
+
 
 #
 # WarpDriveWidget
@@ -77,12 +92,16 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     toolWidgets = [NoneTool.NoneToolWidget(),
                    SmudgeTool.SmudgeToolWidget(),
                    DrawTool.DrawToolWidget(),
-                   PointToPointTool.PointToPointToolWidget()]
+                   PointToPointTool.PointToPointToolWidget(),
+                   ShrinkExpandTool.ShrinkExpandToolWidget()]
 
     for toolWidget in toolWidgets:
       toolsLayout.addWidget(toolWidget.effectButton)
 
     self.ui.drawModeMenu = toolWidgets[2].effectButton.menu()
+    self.ui.shrinkExpandModeMenu = next(filter(lambda x: isinstance(x,qt.QMenu), toolWidgets[4].effectButton.menu().children()))
+    self.ui.shrinkExpandAmmountSlider = next(filter(lambda x: isinstance(x,ctk.ctkSliderWidget), toolWidgets[4].effectButton.menu().children()))
+    self.ui.shrinkExpandButton = toolWidgets[4].effectButton
 
     # Add Tree View
     correctionsLayout = qt.QVBoxLayout(self.ui.correctionsFrame)
@@ -91,7 +110,13 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.atlasesTable = Tables.AtlasesTable()
     atlasesLayout = qt.QVBoxLayout(self.ui.atlasesFrame)
     atlasesLayout.addWidget(self.atlasesTable)
-    self.ui.tabWidget.currentChanged.connect(lambda i,a=self.atlasesTable: a.updateTable())
+
+    self.segmentationsTable = Tables.SegmentationsTable()
+    self.segmentationsTable.setVisible(False)
+    segmentationsLayout = qt.QVBoxLayout(self.ui.segmentationsFrame)
+    segmentationsLayout.addWidget(self.segmentationsTable)
+    
+    self.ui.tabWidget.currentChanged.connect(lambda i,at=self.atlasesTable,st=self.segmentationsTable: [at.updateTable(), st.updateTable()])
 
     # add cli progress bar
     self.ui.landwarpWidget = slicer.modules.fiducialregistrationvariablerbf.createNewWidgetRepresentation()
@@ -123,6 +148,8 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.spacingSpinBox.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.ui.stiffnessSpinBox.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.ui.drawModeMenu.triggered.connect(self.updateParameterNodeFromGUI)
+    self.ui.shrinkExpandModeMenu.triggered.connect(self.updateParameterNodeFromGUI)
+    self.ui.shrinkExpandAmmountSlider.valueChanged.connect(self.updateParameterNodeFromGUI)
     
     # MRML Scene
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
@@ -167,10 +194,7 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         n.SetParameter('sliceViewAnnotationsEnabled','0')
 
     # set name
-    if int(WarpDriveLogic().getParameterNode().GetParameter('SegmentMode')):
-      slicer.util.mainWindow().setWindowTitle("Warp Drive - Segment")
-    else:
-      slicer.util.mainWindow().setWindowTitle("Warp Drive")
+    slicer.util.mainWindow().setWindowTitle("Warp Drive")
     slicer.util.mainWindow().showMaximized()
     qt.QApplication.processEvents()
 
@@ -200,10 +224,10 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     # Add custom ToolBar
     slicer.util.mainWindow().addToolBar(Toolbar.reducedToolbar())
-    # Add add segmentation button
-    button = Buttons.addSegmentationButton()
-    self.atlasesTable.buttonsFrame.layout().insertWidget(1,button,1)
-    button.clicked.connect(self.atlasesTable.updateTable)
+    # Show save segmentation button
+    self.atlasesTable.saveButton.setVisible(True)
+    self.segmentationsTable.setVisible(True)
+    self.segmentationsTable.saveButton.setVisible(True)
     # Put all toolbars in same row
     for tb in slicer.util.mainWindow().findChildren('QToolBar'):
       slicer.util.mainWindow().removeToolBarBreak(tb)
@@ -335,6 +359,9 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.ui.calculateButton.enabled = self._parameterNode.GetNodeReference("InputNode") and self._parameterNode.GetNodeReference("OutputGridTransform")
 
     next(filter(lambda a: a.text == self._parameterNode.GetParameter("DrawMode"), self.ui.drawModeMenu.actions())).setChecked(True)
+    next(filter(lambda a: a.text == self._parameterNode.GetParameter("ShrinkExpandMode"), self.ui.shrinkExpandModeMenu.actions())).setChecked(True)
+    self.ui.shrinkExpandButton.text = self._parameterNode.GetParameter("ShrinkExpandMode")
+    self.ui.shrinkExpandAmmountSlider.value = float(self._parameterNode.GetParameter("ShrinkExpandAmmount"))
 
     # calculate warp
     if self._parameterNode.GetParameter("Update") == "true" and self._parameterNode.GetParameter("Running") == "false" and self.ui.autoUpdateCheckBox.checked:
@@ -368,6 +395,8 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID("TargetFiducial", self.ui.targetFiducialsComboBox.currentNodeID)
     self._parameterNode.SetNodeReferenceID("OutputGridTransform", self.ui.outputSelector.currentNodeID)
     self._parameterNode.SetParameter("DrawMode", next(filter(lambda a: a.checked, self.ui.drawModeMenu.actions())).text)
+    self._parameterNode.SetParameter("ShrinkExpandMode", next(filter(lambda a: a.checked, self.ui.shrinkExpandModeMenu.actions())).text)
+    self._parameterNode.SetParameter("ShrinkExpandAmmount", str(self.ui.shrinkExpandAmmountSlider.value))
     self._parameterNode.SetParameter("Radius", "%.2f" % self.ui.radiusSlider.value)
     self._parameterNode.SetParameter("Stiffness", str(self.ui.stiffnessSpinBox.value))
     # spacing
@@ -417,6 +446,15 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         RBFRadius.append(targetFiducial.GetNthControlPointDescription(i))
     RBFRadius = ",".join(RBFRadius)
     stiffness = float(self._parameterNode.GetParameter("Stiffness"))
+    # snap
+    snapOptionsLoad = json.loads(self._parameterNode.GetParameter("SnapOptions"))
+    if snapOptionsLoad['SnapRun']:
+      snapOptions = None 
+    else:
+      snapOptions = snapOptionsLoad
+      self.logic.removeSnapBackUpIfPresent()
+    snapOptionsLoad['SnapRun'] = False
+    self._parameterNode.SetParameter("SnapOptions", json.dumps(snapOptionsLoad))
 
     # save current state if leadDBS call in case of error
     if self._parameterNode.GetParameter("subjectPath") != '':
@@ -434,17 +472,19 @@ class WarpDriveWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.ui.landwarpWidget.setCurrentCommandLineModuleNode(cliNode)
       # add observer
       cliNode.AddObserver(slicer.vtkMRMLCommandLineModuleNode.StatusModifiedEvent, \
-        lambda c,e,o=outputNode,v=visualizationNodes,a=auxVolumeNode: self.onStatusModifiedEvent(c,o,v,a))
+        lambda c,e,o=outputNode,v=visualizationNodes,a=auxVolumeNode,s=snapOptions: self.onStatusModifiedEvent(c,o,v,a,s))
     else:
-      self.onStatusModifiedEvent(None,outputNode,visualizationNodes,auxVolumeNode)
-    
+      self.onStatusModifiedEvent(None,outputNode,visualizationNodes,auxVolumeNode,snapOptions)
+
   
-  def onStatusModifiedEvent(self, caller, outputNode, visualizationNodes, auxVolumeNode):
+  def onStatusModifiedEvent(self, caller, outputNode, visualizationNodes, auxVolumeNode, snapOptions):
     
     if isinstance(caller, slicer.vtkMRMLCommandLineModuleNode):
       if caller.GetStatusString() == 'Completed':
         # delete cli Node
         qt.QTimer.singleShot(1000, lambda: slicer.mrmlScene.RemoveNode(caller))
+        if snapOptions and snapOptions['AutoApply'] and not snapOptions['SnapRun']:
+          qt.QTimer.singleShot(1000, lambda m=snapOptions['Mode'],s=snapOptions['SourceID'],t=snapOptions['TargetID'],f=self._parameterNode.GetNodeReferenceID("TargetFiducial"): self.logic.runSnap(m, s, t, f))
       else:
         return
 
@@ -509,8 +549,18 @@ class WarpDriveLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter("Stiffness", "0.1")
     if not parameterNode.GetParameter("DrawMode"):
       parameterNode.SetParameter("DrawMode", 'To Nearest Model')
+    if not parameterNode.GetParameter("ShrinkExpandMode"):
+      parameterNode.SetParameter("ShrinkExpandMode", 'Shrink')
+    if not parameterNode.GetParameter("ShrinkExpandAmmount"):
+      parameterNode.SetParameter("ShrinkExpandAmmount", '25')
     if not parameterNode.GetParameter("Running"):
       parameterNode.SetParameter("Running", "false")
+    if not parameterNode.GetParameter("SnapOptions"):
+      parameterNode.SetParameter("SnapOptions", json.dumps({'SnapRun':False, 'AutoApply': False}))
+    if not parameterNode.GetParameter("ModifiableCorrections"):
+      parameterNode.SetParameter("ModifiableCorrections", "0")
+    if not parameterNode.GetParameter("InverseMode"):
+      parameterNode.SetParameter("InverseMode", "0")
 
   def run(self, referenceVolume, outputNode, sourceFiducial, targetFiducial, RBFRadius, stiffness):
 
@@ -523,7 +573,7 @@ class WarpDriveLogic(ScriptedLoadableModuleLogic):
       return
     return cliNode
 
-  def computeWarp(self, referenceVolume, outputNode, sourceFiducial, targetFiducial, RBFRadius, stiffness):
+  def computeWarp(self, referenceVolume, outputNode, sourceFiducial, targetFiducial, RBFRadius, stiffness, wait_for_completion=False):
 
     # Compute the warp with FiducialRegistrationVariableRBF
     cliParams = {
@@ -535,7 +585,7 @@ class WarpDriveLogic(ScriptedLoadableModuleLogic):
       "stiffness" : stiffness,
       } 
 
-    cliNode = slicer.cli.run(slicer.modules.fiducialregistrationvariablerbf, None, cliParams, wait_for_completion=False, update_display=False)
+    cliNode = slicer.cli.run(slicer.modules.fiducialregistrationvariablerbf, None, cliParams, wait_for_completion, update_display=False)
 
     return cliNode
 
@@ -568,6 +618,134 @@ class WarpDriveLogic(ScriptedLoadableModuleLogic):
     transformNode.GetDisplayNode().SetAndObserveGlyphPointsNode(sourceDisplayFiducial)
     transformNode.GetDisplayNode().SetVisibility2D(1)
     return transformNode, sourceDisplayFiducial
+
+  def runSnap(self, snapMode, sourceImageNodeID, targetImageNodeID, targetFiducialNodeID):
+    # check inputs
+    try:
+      sourceImageNode = slicer.util.getNode(sourceImageNodeID)
+    except:
+      raise Exception('Source Image not found by ID' + sourceImageNodeID)
+    try:
+      targetImageNode = slicer.util.getNode(targetImageNodeID)
+    except:
+      raise Exception('Target Image not found by ID' + targetImageNodeID)
+    targetFiducialNode = slicer.util.getNode(targetFiducialNodeID)
+    # save copy of target fiducial as backup
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    clonedItemID = slicer.modules.subjecthierarchy.logic().CloneSubjectHierarchyItem(shNode, shNode.GetItemByDataNode(targetFiducialNode))
+    shNode.SetItemAttribute(clonedItemID, 'SnapBackUp', 'true')
+    # clone image and apply transform
+    clonedItemID = slicer.modules.subjecthierarchy.logic().CloneSubjectHierarchyItem(shNode, shNode.GetItemByDataNode(sourceImageNode))
+    tmpSourceNode = shNode.GetItemDataNode(clonedItemID)
+    tmpSourceNode.SetAndObserveTransformNodeID(sourceImageNode.GetTransformNodeID())
+    tmpSourceNode.HardenTransform()
+    # crop images to roi
+    if snapMode == 'Last correction':
+      clonedItemID = slicer.modules.subjecthierarchy.logic().CloneSubjectHierarchyItem(shNode, shNode.GetItemByDataNode(targetImageNode))
+      targetImageNode = shNode.GetItemDataNode(clonedItemID)
+      roiNode = self.getROIFromFiducial(targetFiducialNode)
+      self.cropVolumeWithROI(tmpSourceNode, roiNode)
+      self.cropVolumeWithROI(targetImageNode, roiNode)
+      slicer.mrmlScene.RemoveNode(roiNode)
+      tmpNodes = [tmpSourceNode, targetImageNode]
+    else:
+      tmpNodes = [tmpSourceNode]
+    # run ants showing progress
+    cliWidget = slicer.modules.antsregistrationcli.createNewWidgetRepresentation()
+    cliWidget.setWindowTitle('WarpDrive Snap')
+    for i,child in enumerate(cliWidget.children()):
+      if i != 3 and hasattr(child, 'hide'):
+        child.hide()
+    outputTransform = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTransformNode')
+    cliNode = self.runANTsRegistration(targetImageNode, tmpSourceNode, outputTransform)
+    cliWidget.setCurrentCommandLineModuleNode(cliNode)
+    cliWidget.show()
+    # add callbacks for post processing
+    tmpNodes.append(outputTransform)
+    tmpNodes.append(cliNode)
+    cliNode.AddObserver(slicer.vtkMRMLCommandLineModuleNode.StatusModifiedEvent, lambda c,e,t=targetFiducialNode,o=outputTransform,m=snapMode,n=tmpNodes,w=cliWidget: self.onStatusModifiedEvent(c,t,o,m,n,w))
+
+  def onStatusModifiedEvent(self, caller, targetFiducialNode, outputTransform, snapMode, tmpNodes,cliWidget):
+    if caller.GetStatusString() == 'Completed':
+      if snapMode == 'All corrections':
+        targetFiducialNode.ApplyTransform(outputTransform.GetTransformToParent())
+      elif snapMode == 'Last correction':
+        correctionName = targetFiducialNode.GetNthControlPointLabel(targetFiducialNode.GetNumberOfControlPoints()-1)
+        for i in range(targetFiducialNode.GetNumberOfControlPoints()):
+          if targetFiducialNode.GetNthControlPointLabel(i) == correctionName:
+            targetFiducialNode.SetNthControlPointPosition(i,outputTransform.GetTransformToParent().TransformDoublePoint(targetFiducialNode.GetNthControlPointPosition(i))[:3])
+      snapOptions = json.loads(self.getParameterNode().GetParameter("SnapOptions"))
+      snapOptions['SnapRun'] = True
+      self.getParameterNode().SetParameter("SnapOptions", json.dumps(snapOptions))
+      self.getParameterNode().SetParameter("Update","true")
+      # cleanup
+      qt.QTimer.singleShot(500, lambda: cliWidget.delete())
+      for node in tmpNodes:
+        qt.QTimer.singleShot(1000, lambda n=node: slicer.mrmlScene.RemoveNode(n))
+
+  def runANTsRegistration(self, fixed, moving, outputTransform):
+    import antsRegistration
+    presetParameters = antsRegistration.PresetManager().getPresetParametersByName('QuickSyN')
+    presetParameters['stages'] = [presetParameters['stages'][-1]] # only SyN stage
+    for stage in presetParameters['stages']:
+      for metric in stage['metrics']:
+        metric['fixed'] = fixed
+        metric['moving'] = moving
+    presetParameters['outputSettings']['volume'] = None
+    presetParameters['outputSettings']['transform'] = outputTransform
+    presetParameters['outputSettings']['log'] = None
+    logic = antsRegistration.antsRegistrationLogic()
+    logic.process(**presetParameters)
+    return logic.cliNode
+
+  def getROIFromFiducial(self, fiducialNode):
+    pointsInROI = None
+    correctionName = fiducialNode.GetNthControlPointLabel(fiducialNode.GetNumberOfControlPoints()-1)
+    for i in range(fiducialNode.GetNumberOfControlPoints()):
+      if fiducialNode.GetNthControlPointLabel(i) == correctionName:
+        if pointsInROI is None:
+          pointsInROI = np.array([fiducialNode.GetNthControlPointPosition(i)])
+          radius = float(fiducialNode.GetNthControlPointDescription(i))
+          radius = np.max([radius, 30])
+        else:
+          pointsInROI = np.vstack((pointsInROI, fiducialNode.GetNthControlPointPosition(i)))
+    LRlimits = np.array([np.min(pointsInROI[:,0]), np.max(pointsInROI[:,0])])
+    APlimits = np.array([np.min(pointsInROI[:,1]), np.max(pointsInROI[:,1])])
+    ISlimits = np.array([np.min(pointsInROI[:,2]), np.max(pointsInROI[:,2])])
+    roiNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsROINode')
+    roiNode.GetDisplayNode().SetVisibility(0)
+    roiNode.SetCenter([(LRlimits[0]+LRlimits[1])/2, (APlimits[0]+APlimits[1])/2, (ISlimits[0]+ISlimits[1])/2])
+    roiNode.SetRadiusXYZ([(LRlimits[1]-LRlimits[0])/2 + radius, (APlimits[1]-APlimits[0])/2 + radius, (ISlimits[1]-ISlimits[0])/2 + radius])
+    return roiNode
+
+  def cropVolumeWithROI(self, volumeNode, roiNode):
+    cropVolumeParameters = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLCropVolumeParametersNode")
+    cropVolumeParameters.SetInputVolumeNodeID(volumeNode.GetID())
+    cropVolumeParameters.SetOutputVolumeNodeID(volumeNode.GetID())
+    cropVolumeParameters.SetROINodeID(roiNode.GetID())
+    cropVolumeParameters.SetVoxelBased(1)
+    slicer.modules.cropvolume.logic().Apply(cropVolumeParameters)
+
+  def removeSnapBackUpIfPresent(self):
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    markupsNodes = slicer.mrmlScene.GetNodesByClass('vtkMRMLMarkupsFiducialNode')
+    markupsNodes.UnRegister(slicer.mrmlScene)
+    for i in range(markupsNodes.GetNumberOfItems()):
+      backupNode = markupsNodes.GetItemAsObject(i)
+      if ('SnapBackUp' in shNode.GetItemAttributeNames(shNode.GetItemByDataNode(backupNode))):
+        slicer.mrmlScene.RemoveNode(backupNode)
+
+  def invertAtlases(self, inputNode, useInverse=None):
+    useInverse = useInverse if useInverse is not None else self.inverseAction.checked
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    nModels = slicer.mrmlScene.GetNumberOfNodesByClass('vtkMRMLModelNode')
+    for i in range(nModels):
+      modelNode = slicer.mrmlScene.GetNthNodeByClass(i, 'vtkMRMLModelNode')
+      modelItem = shNode.GetItemByDataNode(modelNode)
+      if 'atlas' in shNode.GetItemAttributeNames(modelItem):
+        modelNode.SetAndObserveTransformNodeID(inputNode.GetID() if useInverse else None)
+      elif 'segmentation' in shNode.GetItemAttributeNames(modelItem):
+        modelNode.SetAndObserveTransformNodeID(None if useInverse else inputNode.GetID())
 
 
 #

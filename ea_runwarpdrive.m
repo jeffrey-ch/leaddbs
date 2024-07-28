@@ -1,4 +1,4 @@
-function [] = ea_runwarpdrive(options, segment_mode)
+function [] = ea_runwarpdrive(options)
 
 %
 % Get all subjects and only run warpdrive in the last one
@@ -28,7 +28,7 @@ for i = 1:length(warpdrive_subs)
         if isfield(options, 'overwriteapproved')
             keep_pts(i) = keep_pts(i) || options.overwriteapproved;
         end
-        if ~contains(approved_load.method, 'ANTs')
+        if ~contains(approved_load.method, {'ANTs', 'EasyReg'})
             keep_pts(i) = 0;
             disp([warpdrive_subs(i).subjId ' was normalized using ' approved_load.method '. Use ANTs in order to run warpdrive.']);
         end
@@ -45,7 +45,7 @@ end
 %
 
 s4l = ea_slicer_for_lead;
-if ~s4l.is_installed_and_up_to_date()
+if ~s4l.is_up_to_date()
     s4l.install();
 end
 
@@ -97,7 +97,6 @@ python_commands = [strcat("slicer.app.settings().setValue('NetstimPreferences/le
                     strcat("WarpDrive.WarpDriveLogic().getParameterNode().SetParameter('LeadSubjects',json.dumps(json.load(open(r'", tmp_file, "'))))");...
                     strcat("WarpDrive.WarpDriveLogic().getParameterNode().SetParameter('MNIPath',r'", remove_last_filesep(ea_space), "')");...
                     strcat("WarpDrive.WarpDriveLogic().getParameterNode().SetParameter('LeadAtlas',r'", options.atlasset, "')");...
-                    strcat("WarpDrive.WarpDriveLogic().getParameterNode().SetParameter('SegmentMode',r'", segment_mode, "')");...
                     strcat("os.remove(r'", tmp_file, "')");...
                     "slicer.util.selectModule('WarpDrive')"];
 

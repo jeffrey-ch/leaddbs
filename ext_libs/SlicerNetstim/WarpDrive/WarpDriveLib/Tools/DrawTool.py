@@ -73,12 +73,8 @@ class DrawToolEffect(AbstractDrawEffect):
         self.resetDrawing()
         return
 
-      self.sourceFiducial.ApplyTransform(self.parameterNode.GetNodeReference("OutputGridTransform").GetTransformFromParent()) # undo current
+      self.applyCorrection(self.sourceFiducial, targetFiducial)
 
-      self.setFiducialNodeAs("Source", self.sourceFiducial, targetFiducial.GetName(), self.parameterNode.GetParameter("Radius"))
-      self.setFiducialNodeAs("Target", targetFiducial, targetFiducial.GetName(), self.parameterNode.GetParameter("Radius"))
-
-      self.parameterNode.SetParameter("Update","true")
       self.sourceFiducial = None
       self.resetDrawing()
 
@@ -146,7 +142,7 @@ class DrawToolEffect(AbstractDrawEffect):
     p = np.zeros(3)
     for i in range(sourceNode.GetNumberOfControlPoints()):
       sourceNode.GetNthControlPointPosition(i,p)
-      targetNode.AddFiducialFromArray(p, label)
+      targetNode.AddControlPoint(p, label)
 
 
   def curveToFiducial(self, curve):

@@ -34,6 +34,10 @@ if ~exist('fname','var')
     fname=0;
 end
 
+if isempty(fname)
+    fname=0;
+end
+
 if ~fname || isempty(fname)
     if useinverse
         defaultPath = ea_space;
@@ -194,7 +198,7 @@ else % from [untouched] achor space to template space
     else
         refim=ea_niigz([ea_space,options.primarytemplate]);
     end
-    if length(from)==1
+    if length(to)==1
         interp='auto';
     else
         interp=1;

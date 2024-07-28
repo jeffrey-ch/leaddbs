@@ -4,6 +4,8 @@ from PythonQt import BoolResult
 from slicer.util import VTKObservationMixin
 import WarpDrive, ImportAtlas
 import numpy as np
+import glob
+import json
 
 class TextEditDelegate(qt.QItemDelegate):
   def __init__(self, parent, renameControlPointsFunction):
@@ -34,7 +36,7 @@ class SpinBoxDelegate(qt.QItemDelegate):
     spinBox = qt.QDoubleSpinBox(parent)
     spinBox.setSingleStep(1)
     spinBox.maximum = 50
-    spinBox.minimum = 5
+    spinBox.minimum = 1
     return spinBox
 
   def setEditorData(self, editor, index):
@@ -110,16 +112,14 @@ class baseTable(qt.QWidget):
   def onRemoveButton(self):
     pass
 
-class AtlasesTable(baseTable):
+class AtlasSegmentationBaseTable(baseTable):
 
   def __init__(self):
 
-    self.view = slicer.qMRMLSubjectHierarchyTreeView(slicer.util.mainWindow())
     self.view.setMRMLScene(slicer.mrmlScene)
     self.view.contextMenuEnabled = False
     self.view.setEditTriggers(0) # disable double click to edit
     self.view.nodeTypes = ('vtkMRMLModelNode','vtkMRMLFolderDisplayNode')
-    self.view.attributeNameFilter = ('atlas')
     for key in ['idColumn', 'transformColumn', 'descriptionColumn']:
       self.view.setColumnHidden(eval('self.view.model().'+key), True)
 
@@ -127,38 +127,58 @@ class AtlasesTable(baseTable):
 
     super().__init__()
 
-    self.addButton.setText('Atlas')
-    self.addButton.setToolTip('Add atlas')
+    self.saveButton = qt.QToolButton()
+    self.saveButton.setVisible(False)
+    self.saveButton.setToolButtonStyle(qt.Qt.ToolButtonTextUnderIcon)
+    self.saveButton.setText('Save')
+    self.saveButton.setIcon(qt.QIcon(":/Icons/Small/SlicerSave.png"))
+    self.saveButton.setIconSize(self.removeButton.iconSize)
+    self.saveButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding,qt.QSizePolicy.Maximum)
+    self.saveButton.clicked.connect(self.onSaveClicked)
 
-    self.buttonsFrame.layout().addStretch(2)
+    self.buttonsFrame.layout().addWidget(self.saveButton,1)
 
-    self.updateTable()
+  def onSaveClicked(self):
+    currentSubjectPath = os.path.dirname(json.loads(WarpDrive.WarpDriveLogic().getParameterNode().GetParameter("CurrentSubject"))['warpdrive_path'])
+    outputDir = os.path.join(currentSubjectPath, 'segmentations') if int(WarpDrive.WarpDriveLogic().getParameterNode().GetParameter("InverseMode")) else os.path.join(currentSubjectPath, 'segmentations_mni')
+    qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+    qt.QApplication.processEvents()
+    self.saveSegmentation(outputDir)
+    qt.QApplication.restoreOverrideCursor()
+  
+  def saveSegmentation(self, segmentationPath):
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    modelNodes = slicer.mrmlScene.GetNodesByClass('vtkMRMLModelNode')
+    modelNodes.UnRegister(slicer.mrmlScene)
+    for i in range(modelNodes.GetNumberOfItems()):
+      modelNode = modelNodes.GetItemAsObject(i)
+      modelItem = shNode.GetItemByDataNode(modelNode)
+      if modelNode.GetDisplayNode().GetVisibility() and self.view.attributeNameFilter in shNode.GetItemAttributeNames(modelItem):
+        # construct name
+        name = modelNode.GetName()
+        node = modelNode
+        while shNode.GetItemParent(shNode.GetItemByDataNode(node)) != shNode.GetSceneItemID():
+          node = shNode.GetItemDataNode(shNode.GetItemParent(shNode.GetItemByDataNode(node)))
+          name = os.path.join(node.GetName(), name)
+        # save segmentation
+        clonedItemID = slicer.modules.subjecthierarchy.logic().CloneSubjectHierarchyItem(shNode, shNode.GetItemByDataNode(modelNode))
+        tmpNode = shNode.GetItemDataNode(clonedItemID)
+        tmpNode.SetAndObserveTransformNodeID(modelNode.GetTransformNodeID())
+        tmpNode.HardenTransform()
+        labelNode = self.modelToLabel(modelNode)
+        os.makedirs(os.path.dirname(name), exist_ok=True)
+        slicer.util.saveNode(labelNode, os.path.join(segmentationPath, name + '.nii.gz'))      
+        slicer.mrmlScene.RemoveNode(labelNode)
+        slicer.mrmlScene.RemoveNode(tmpNode)
 
-  def updateTable(self):
-    currentValue = self.view.attributeNameFilter
-    self.view.attributeNameFilter = ('')
-    self.view.attributeNameFilter = currentValue
-
-  def onAddButton(self):
-    leadDBSPath = slicer.util.settingsValue("NetstimPreferences/leadDBSPath", "", converter=str)
-    if leadDBSPath == "":
-      qt.QMessageBox().warning(qt.QWidget(), "", "Add Lead-DBS path to Slicer preferences")
-      return
-    validAtlasesNames = ImportAtlas.ImportAtlasLogic().getValidAtlases()
-    if not validAtlasesNames:
-      return
-    result = BoolResult()
-    atlasName = qt.QInputDialog.getItem(qt.QWidget(),'Select Atlas','',validAtlasesNames,0,0,result) 
-    if result:
-      qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
-      qt.QApplication.processEvents()
-      try:
-        ImportAtlas.ImportAtlasLogic().readAtlas(os.path.join(ImportAtlas.ImportAtlasLogic().getAtlasesPath(), atlasName, 'atlas_index.mat'))    
-      finally:
-        qt.QApplication.restoreOverrideCursor()
-    tb = next(filter(lambda x: isinstance(x,qt.QToolBar) and x.windowTitle=='LeadDBS', slicer.util.mainWindow().children()))
-    tb.invertAtlases(WarpDrive.WarpDriveLogic().getParameterNode().GetNodeReference("InputNode"))
-    self.updateTable()
+  def modelToLabel(self, model_node):
+    segmentationsLogic = slicer.modules.segmentations.logic()
+    segmentNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'segmentation')
+    labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'label')
+    segmentationsLogic.ImportModelToSegmentationNode(model_node, segmentNode)
+    segmentationsLogic.ExportAllSegmentsToLabelmapNode(segmentNode, labelNode)
+    slicer.mrmlScene.RemoveNode(segmentNode)
+    return labelNode
 
   def onRemoveButton(self):
     nodeID = self.view.currentItem()
@@ -187,10 +207,145 @@ class AtlasesTable(baseTable):
     # create markups node, add center as fiducial and jump and center slices
     markupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode')
     markupsNode.GetDisplayNode().SetVisibility(False)
-    markupsNode.AddFiducialFromArray(np.array(centerList),'')
+    markupsNode.AddControlPoint(np.array(centerList),'')
     markupsLogic = slicer.modules.markups.logic()
     markupsLogic.JumpSlicesToNthPointInMarkup(markupsNode.GetID(),0,True)
     slicer.mrmlScene.RemoveNode(markupsNode)
+
+  def updateTable(self):
+    currentValue = self.view.attributeNameFilter
+    self.view.attributeNameFilter = ('')
+    self.view.attributeNameFilter = currentValue
+
+class SegmentationsTable(AtlasSegmentationBaseTable):
+
+  def __init__(self):
+
+    self.view = slicer.qMRMLSubjectHierarchyTreeView(slicer.util.mainWindow())
+    self.view.attributeNameFilter = ('segmentation')
+
+    super().__init__()
+
+    self.addButton.setText('Segmentation')
+    self.addButton.setToolTip('Add segmentation')
+
+    self.buttonsFrame.layout().addStretch(2)
+
+    self.updateTable()
+
+  def onAddButton(self):
+    currentSubject = json.loads(WarpDrive.WarpDriveLogic().getParameterNode().GetParameter("CurrentSubject"))
+    segmentationsPath = os.path.join(os.path.dirname(currentSubject['warpdrive_path']), 'segmentations')
+    subFolders = [os.path.basename(x) for x in sorted(glob.glob(os.path.join(segmentationsPath, '*')))]
+    result = BoolResult()
+    segmentationName = qt.QInputDialog.getItem(qt.QWidget(),'Select Atlas','',subFolders,0,0,result) 
+    if result:
+      qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+      qt.QApplication.processEvents()
+      try:
+        self.loadSegmentation(os.path.join(segmentationsPath, segmentationName))    
+      finally:
+        qt.QApplication.restoreOverrideCursor()
+    self.updateTable()
+
+  def loadSegmentation(self, segmentationPath):
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    niiFiles = glob.glob(os.path.join(segmentationPath, '**', '*.nii*'), recursive=True)
+    for file in niiFiles:
+      # load
+      volumeNode = slicer.util.loadVolume(file,{'show':False})
+      modelNode = self.volumeToModel(volumeNode)
+      slicer.mrmlScene.RemoveNode(volumeNode)
+      modelNode.GetDisplayNode().SetVisibility2D(1)
+      # set in hierarchy
+      basePath,fileName = os.path.split(file)
+      parentFolders = os.path.relpath(basePath, os.path.dirname(segmentationPath)).split(os.sep)
+      folderID = self.getOrCreateFolderItem(shNode.GetSceneItemID(), parentFolders.pop(0))
+      for parentName in parentFolders:
+        folderID = self.getOrCreateFolderItem(folderID, parentName)
+      shNode.SetItemParent(shNode.GetItemByDataNode(modelNode), folderID)
+      shNode.SetItemAttribute(shNode.GetItemByDataNode(modelNode), 'segmentation', '1')
+      modelNode.SetName(fileName.split('.')[0])
+    WarpDrive.WarpDriveLogic().invertAtlases(WarpDrive.WarpDriveLogic().getParameterNode().GetNodeReference("InputNode"), int(WarpDrive.WarpDriveLogic().getParameterNode().GetParameter("InverseMode")))
+
+  def volumeToModel(self, volumeNode):
+    labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+    volumeArray = slicer.util.array(volumeNode.GetID())
+    volumeArray[:] = volumeArray > 0.5
+    volumeNode.Modified()
+    slicer.modules.volumes.logic().CreateLabelVolumeFromVolume(slicer.mrmlScene, labelNode, volumeNode)
+    segmentationsLogic = slicer.modules.segmentations.logic()
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    segmentNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', 'segmentation')
+    segmentationsLogic.ImportLabelmapToSegmentationNode(labelNode, segmentNode)
+    itemID = shNode.CreateFolderItem(shNode.GetSceneItemID(), 'aux')
+    segmentationsLogic.ExportAllSegmentsToModels(segmentNode, itemID)
+    childID = []
+    shNode.GetItemChildren(itemID, childID, False)
+    shNode.SetItemParent(childID[0], shNode.GetSceneItemID())
+    shNode.RemoveItem(itemID)
+    slicer.mrmlScene.RemoveNode(segmentNode)
+    slicer.mrmlScene.RemoveNode(labelNode)
+    return shNode.GetItemDataNode(childID[0])
+
+  def createFolderDisplayNode(self, folderID, color=[0.66,0.66,0.66], opacity=1.0):
+    # from qSlicerSubjectHierarchyFolderPlugin.cxx
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    displayNode = slicer.vtkMRMLFolderDisplayNode()
+    displayNode.SetName(shNode.GetItemName(folderID))
+    displayNode.SetHideFromEditors(0)
+    displayNode.SetAttribute('SubjectHierarchy.Folder', "1")
+    displayNode.SetColor(*color)
+    displayNode.SetOpacity(opacity)
+    shNode.GetScene().AddNode(displayNode)
+    shNode.SetItemDataNode(folderID, displayNode)
+    shNode.ItemModified(folderID)
+
+  def getOrCreateFolderItem(self, parentID, name):
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    folderID = shNode.GetItemChildWithName(parentID, name)
+    if folderID == 0:
+      folderID = shNode.CreateFolderItem(parentID, name)
+      self.createFolderDisplayNode(folderID)
+      shNode.SetItemAttribute(folderID, 'segmentation', '1')
+    return folderID
+
+
+class AtlasesTable(AtlasSegmentationBaseTable):
+
+  def __init__(self):
+
+    self.view = slicer.qMRMLSubjectHierarchyTreeView(slicer.util.mainWindow())
+    self.view.attributeNameFilter = ('atlas')
+
+    super().__init__()
+
+    self.addButton.setText('Atlas')
+    self.addButton.setToolTip('Add atlas')
+
+    self.buttonsFrame.layout().addStretch(2)
+
+    self.updateTable()
+
+  def onAddButton(self):
+    leadDBSPath = slicer.util.settingsValue("NetstimPreferences/leadDBSPath", "", converter=str)
+    if leadDBSPath == "":
+      qt.QMessageBox().warning(qt.QWidget(), "", "Add Lead-DBS path to Slicer preferences")
+      return
+    validAtlasesNames = ImportAtlas.ImportAtlasLogic().getValidAtlases()
+    if not validAtlasesNames:
+      return
+    result = BoolResult()
+    atlasName = qt.QInputDialog.getItem(qt.QWidget(),'Select Atlas','',validAtlasesNames,0,0,result) 
+    if result:
+      qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+      qt.QApplication.processEvents()
+      try:
+        ImportAtlas.ImportAtlasLogic().readAtlas(os.path.join(ImportAtlas.ImportAtlasLogic().getAtlasesPath(), atlasName, 'atlas_index.mat'))    
+      finally:
+        qt.QApplication.restoreOverrideCursor()
+    WarpDrive.WarpDriveLogic().invertAtlases(WarpDrive.WarpDriveLogic().getParameterNode().GetNodeReference("InputNode"), int(WarpDrive.WarpDriveLogic().getParameterNode().GetParameter("InverseMode")))
+    self.updateTable()
 
 class WarpDriveCorrectionsTable(baseTable):
 
@@ -218,34 +373,6 @@ class WarpDriveCorrectionsTable(baseTable):
 
     super().__init__()
 
-    effectPixmap = qt.QPixmap(os.path.join(os.path.split(WarpDrive.__file__)[0], 'Resources', 'Icons', 'SlicerVisible.png'))
-    effectIcon = qt.QIcon(effectPixmap)
-    self.sourceVisibleButton = qt.QToolButton()
-    self.sourceVisibleButton.setToolButtonStyle(qt.Qt.ToolButtonTextUnderIcon)
-    self.sourceVisibleButton.setIcon(effectIcon)
-    self.sourceVisibleButton.setIconSize(effectPixmap.rect().size())
-    self.sourceVisibleButton.setText('Source')
-    self.sourceVisibleButton.setToolTip('Toggle source fiducials visibility')
-    self.sourceVisibleButton.setCheckable(True)
-    self.sourceVisibleButton.setChecked(False)
-    self.sourceVisibleButton.setEnabled(True)
-    self.sourceVisibleButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding,qt.QSizePolicy.Maximum)
-    self.sourceVisibleButton.toggled.connect(self.onSourceVisibleToggled)
-    
-    effectPixmap = qt.QPixmap(os.path.join(os.path.split(WarpDrive.__file__)[0], 'Resources', 'Icons', 'SlicerVisible.png'))
-    effectIcon = qt.QIcon(effectPixmap)
-    self.targetVisibleButton = qt.QToolButton()
-    self.targetVisibleButton.setToolButtonStyle(qt.Qt.ToolButtonTextUnderIcon)
-    self.targetVisibleButton.setIcon(effectIcon)
-    self.targetVisibleButton.setIconSize(effectPixmap.rect().size())
-    self.targetVisibleButton.setText('Target')
-    self.targetVisibleButton.setToolTip('Toggle target fiducials visibility')    
-    self.targetVisibleButton.setCheckable(True)
-    self.targetVisibleButton.setChecked(False)
-    self.targetVisibleButton.setEnabled(True)
-    self.targetVisibleButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding,qt.QSizePolicy.Maximum)
-    self.targetVisibleButton.toggled.connect(self.onTargetVisibleToggled)
-
     effectPixmap = qt.QPixmap(os.path.join(os.path.split(WarpDrive.__file__)[0], 'Resources', 'Icons', 'SlicerUndo.png'))
     effectIcon = qt.QIcon(effectPixmap)
     self.undoButton = qt.QToolButton()
@@ -260,21 +387,107 @@ class WarpDriveCorrectionsTable(baseTable):
     self.undoButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding,qt.QSizePolicy.Maximum)
     self.undoButton.clicked.connect(self.onUndoClicked)
 
-    self.buttonsFrame.layout().addWidget(self.sourceVisibleButton,1)
-    self.buttonsFrame.layout().addWidget(self.targetVisibleButton,1)
+    self.sourceVisibleAction = qt.QAction(self)
+    self.sourceVisibleAction.setText('Source')
+    self.sourceVisibleAction.setCheckable(True)
+    self.sourceVisibleAction.setChecked(False)
+    self.targetVisibleAction = qt.QAction(self)
+    self.targetVisibleAction.setText('Target')
+    self.targetVisibleAction.setCheckable(True)
+    self.targetVisibleAction.setChecked(True)
+    self.previewSelectedAction = qt.QAction(self)
+    self.previewSelectedAction.setText('Preview selected correction')
+    self.previewSelectedAction.setCheckable(True)
+    self.previewSelectedAction.setChecked(True)
+    visibilityGroup = qt.QActionGroup(self)
+    visibilityGroup.setExclusive(False)
+    visibilityGroup.connect('triggered(QAction*)', self.visibilityChanged)
+    visibilityGroup.addAction(self.sourceVisibleAction)
+    visibilityGroup.addAction(self.targetVisibleAction)
+    visibilityGroup.addAction(self.previewSelectedAction)
+
+    modifiableCorrectionsAction = qt.QAction(self)
+    modifiableCorrectionsAction.setText('Modifiable corrections')
+    modifiableCorrectionsAction.setCheckable(True)
+    modifiableCorrectionsAction.setChecked(False)
+    modifiableCorrectionsAction.setToolTip('When checked, corrections are modified by new ones.')
+    modifiableCorrectionsAction.connect('toggled(bool)', self.modiableCorrectionsChanged)
+
+    settingsMenu = qt.QMenu(self)
+    visibilityMenu = settingsMenu.addMenu("Visibility")
+    visibilityMenu.addActions(visibilityGroup.actions())
+    settingsMenu.addAction(modifiableCorrectionsAction)
+
+    settingsAction = qt.QAction(self)
+    settingsAction.setIcon(qt.QIcon(":/Icons/Small/SlicerConfigure.png"))
+    settingsAction.setText('Settings')
+    settingsButton = qt.QToolButton()
+    settingsButton.setDefaultAction(settingsAction)
+    settingsButton.setMenu(settingsMenu)
+    settingsButton.setToolButtonStyle(qt.Qt.ToolButtonTextUnderIcon)
+    settingsButton.setPopupMode(qt.QToolButton.InstantPopup)
+    settingsButton.setIconSize(effectPixmap.rect().size())
+    settingsButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding,qt.QSizePolicy.Maximum)
+
+    self.snapAutoApplyCheckBox = qt.QCheckBox('Auto apply')
+    self.snapAutoApplyCheckBox.setToolTip('When checked, Snap will run after every correction is made.')
+    self.snapAutoApplyCheckBox.setChecked(False)
+    self.snapModeComboBox = qt.QComboBox()
+    self.snapModeComboBox.addItems(['Last correction', 'All corrections'])
+    self.snapSourceComboBox = slicer.qMRMLNodeComboBox()
+    self.snapSourceComboBox.nodeTypes = ['vtkMRMLScalarVolumeNode']
+    self.snapSourceComboBox.selectNodeUponCreation = False
+    self.snapSourceComboBox.noneEnabled = True
+    self.snapSourceComboBox.addEnabled = False
+    self.snapSourceComboBox.removeEnabled = False
+    self.snapSourceComboBox.setMRMLScene(slicer.mrmlScene)
+    self.snapSourceComboBox.setToolTip("Select the source volume for snap")
+    self.snapTargetComboBox = slicer.qMRMLNodeComboBox()
+    self.snapTargetComboBox.nodeTypes = ['vtkMRMLScalarVolumeNode']
+    self.snapTargetComboBox.selectNodeUponCreation = False
+    self.snapTargetComboBox.noneEnabled = True
+    self.snapTargetComboBox.addEnabled = False
+    self.snapTargetComboBox.removeEnabled = False
+    self.snapTargetComboBox.setMRMLScene(slicer.mrmlScene)
+    self.snapTargetComboBox.setToolTip("Select the target volume for snap")
+    menu = qt.QMenu(self)
+    for widget,signal in zip([self.snapAutoApplyCheckBox, self.snapModeComboBox, self.snapSourceComboBox, self.snapTargetComboBox], ["stateChanged(int)", "currentIndexChanged(int)", "currentNodeChanged(vtkMRMLNode*)", "currentNodeChanged(vtkMRMLNode*)"]):
+      widget.connect(signal, self.updateSnapOptionsFromGUI)
+      a = qt.QWidgetAction(self)
+      a.setDefaultWidget(widget)
+      menu.addAction(a) 
+    effectPixmap = qt.QPixmap(os.path.join(os.path.split(WarpDrive.__file__)[0], 'Resources', 'Icons', 'Magnet.png'))
+    effectIcon = qt.QIcon(effectPixmap)    
+    self.sanpAction = qt.QAction(self)
+    self.sanpAction.setIcon(effectIcon)
+    self.sanpAction.setText('Snap')
+    self.sanpAction.setToolTip('Calls ANTs SyN registering the image with modifications to the MNI template. Then applies the transform to the target fiducials.')
+    self.sanpAction.setCheckable(False)
+    self.sanpAction.connect("triggered(bool)", self.onSnapTriggered)
+    snapToolButton = qt.QToolButton()
+    snapToolButton.setDefaultAction(self.sanpAction)
+    snapToolButton.setMenu(menu)
+    snapToolButton.setToolButtonStyle(qt.Qt.ToolButtonTextUnderIcon)
+    snapToolButton.setPopupMode(qt.QToolButton.MenuButtonPopup)
+    snapToolButton.setIconSize(effectPixmap.rect().size())
+    snapToolButton.setSizePolicy(qt.QSizePolicy.MinimumExpanding,qt.QSizePolicy.Maximum)
+
     self.buttonsFrame.layout().addWidget(self.undoButton,1)
+    self.buttonsFrame.layout().addWidget(settingsButton,1)
+    if hasattr(slicer.modules,'antsregistration'):
+      self.buttonsFrame.layout().addWidget(snapToolButton,1)
 
     self.addButton.setText('Fixed point')
     self.addButton.setToolTip('Add fixed point')
-
-    self.previewSelectedCheckBox = qt.QCheckBox('Preview selected correction')
-    self.previewSelectedCheckBox.setChecked(True)
-    self.parentLayout.addWidget(self.previewSelectedCheckBox)
   
-  def onSourceVisibleToggled(self):
+
+  def updateSnapOptionsFromGUI(self):
     pass
 
-  def onTargetVisibleToggled(self):
+  def onSnapTriggered(self):
+    pass
+
+  def visibilityChanged(self, action):
     pass
 
   def onSelectionChanged(self):
@@ -292,6 +505,8 @@ class WarpDriveCorrectionsTable(baseTable):
     for selectedRow in selectedRows:
       return selectedRow.row() # is a single selection view
 
+  def modiableCorrectionsChanged(self, checked):
+    pass
 
 class WarpDriveCorrectionsManager(VTKObservationMixin, WarpDriveCorrectionsTable):
   def __init__(self):
@@ -304,16 +519,18 @@ class WarpDriveCorrectionsManager(VTKObservationMixin, WarpDriveCorrectionsTable
     self.sourceFiducialObservers = []
     self.parameterNode = WarpDrive.WarpDriveLogic().getParameterNode()
     self.addObserver(self.parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateNodesListeners)
+    self.addObserver(self.parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromSnapOptions)
+    self._updatingSnapGUI = False
 
-  def onSourceVisibleToggled(self):
-    if self.sourceFiducialNodeID != "":
-      sourceFiducialNode = slicer.mrmlScene.GetNodeByID(self.sourceFiducialNodeID)
-      sourceFiducialNode.GetDisplayNode().SetVisibility(self.sourceVisibleButton.checked)
-
-  def onTargetVisibleToggled(self):
-    if self.targetFiducialNodeID != "":
-      targetFiducialNode = slicer.mrmlScene.GetNodeByID(self.targetFiducialNodeID)
-      targetFiducialNode.GetDisplayNode().SetVisibility(self.targetVisibleButton.checked)
+  def visibilityChanged(self, action):
+    if action.text == 'Source':
+      nodeID = self.sourceFiducialNodeID  
+    elif action.text == 'Target':
+      nodeID = self.targetFiducialNodeID
+    else:
+      nodeID = None
+    if nodeID:
+      slicer.util.getNode(nodeID).GetDisplayNode().SetVisibility(action.checked)
 
   def onAddButton(self):
     if self.targetFiducialNodeID == "":
@@ -358,11 +575,11 @@ class WarpDriveCorrectionsManager(VTKObservationMixin, WarpDriveCorrectionsTable
     if self.targetFiducialNodeID != "":
       targetFiducialNode = slicer.mrmlScene.GetNodeByID(self.targetFiducialNodeID)
       if targetFiducialNode.GetDisplayNode():
-        self.targetVisibleButton.checked = targetFiducialNode.GetDisplayNode().GetVisibility()
+        self.targetVisibleAction.checked = targetFiducialNode.GetDisplayNode().GetVisibility()
     if self.sourceFiducialNodeID != "":
       sourceFiducialNode = slicer.mrmlScene.GetNodeByID(self.sourceFiducialNodeID)
       if sourceFiducialNode.GetDisplayNode():
-        self.sourceVisibleButton.checked = sourceFiducialNode.GetDisplayNode().GetVisibility()
+        self.sourceVisibleAction.checked = sourceFiducialNode.GetDisplayNode().GetVisibility()
 
   def targetFiducialModified(self, caller, event):
     self.setUpWidget()
@@ -426,11 +643,36 @@ class WarpDriveCorrectionsManager(VTKObservationMixin, WarpDriveCorrectionsTable
     self.removeCorrectionByName(correctionName)
 
   def onUndoClicked(self):
+    undoSnap = self.undoSnapIfPresent()
+    if undoSnap:
+      return
     if self.model.rowCount() == 0:
       return
     index = self.model.index(self.model.rowCount()-1, 1)
     correctionName = self.model.itemData(index)[0]
     self.removeCorrectionByName(correctionName)
+
+  def undoSnapIfPresent(self):
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    markupsNodes = slicer.mrmlScene.GetNodesByClass('vtkMRMLMarkupsFiducialNode')
+    markupsNodes.UnRegister(slicer.mrmlScene)
+    for i in range(markupsNodes.GetNumberOfItems()):
+      backupNode = markupsNodes.GetItemAsObject(i)
+      if ('SnapBackUp' in shNode.GetItemAttributeNames(shNode.GetItemByDataNode(backupNode))):
+        targetFiducialNode = slicer.mrmlScene.GetNodeByID(self.targetFiducialNodeID)
+        targetFiducialNode.Copy(backupNode)
+        slicer.mrmlScene.RemoveNode(backupNode)
+        targetFiducialNode.CreateDefaultDisplayNodes()
+        targetFiducialNode.GetDisplayNode().SetGlyphTypeFromString('Sphere3D')
+        targetFiducialNode.GetDisplayNode().SetGlyphScale(1)
+        targetFiducialNode.GetDisplayNode().SetPointLabelsVisibility(0)
+        for sliceNode in slicer.util.getNodesByClass('vtkMRMLSliceNode'):
+          sliceNode.Modified()
+        snapOptions = json.loads(self.parameterNode.GetParameter("SnapOptions"))
+        snapOptions['SnapRun'] = True
+        self.parameterNode.SetParameter("SnapOptions", json.dumps(snapOptions))
+        self.parameterNode.SetParameter("Update","true")
+        return True
 
   def removeCorrectionByName(self, correctionName):
     targetFiducialNode = slicer.mrmlScene.GetNodeByID(self.targetFiducialNodeID)
@@ -480,7 +722,7 @@ class WarpDriveCorrectionsManager(VTKObservationMixin, WarpDriveCorrectionsTable
     self._updatingFiducials = False
 
   def onSelectionChanged(self):
-    if not self.previewSelectedCheckBox.checked:
+    if not self.previewSelectedAction.checked:
       return
     correctionName = self.getSelectedCorrectionName()
     if correctionName is None:
@@ -501,3 +743,40 @@ class WarpDriveCorrectionsManager(VTKObservationMixin, WarpDriveCorrectionsTable
     tmpNodes = WarpDrive.WarpDriveLogic().previewWarp(sourcePoints, targetPoints)
     for n in tmpNodes:
       qt.QTimer.singleShot(1000, lambda node=n: slicer.mrmlScene.RemoveNode(node))
+
+  def updateSnapOptionsFromGUI(self):
+    if self._updatingSnapGUI or not self.parameterNode.GetParameter("SnapOptions"):
+      return
+    options = json.loads(self.parameterNode.GetParameter("SnapOptions"))
+    options['AutoApply'] = self.snapAutoApplyCheckBox.isChecked()
+    options['Mode'] = self.snapModeComboBox.currentText
+    options['SourceID'] = self.snapSourceComboBox.currentNodeID
+    options['TargetID'] = self.snapTargetComboBox.currentNodeID
+    self.parameterNode.SetParameter("SnapOptions", json.dumps(options))
+
+  def updateGUIFromSnapOptions(self, caller=None, event=None):
+    if not self.parameterNode.GetParameter("SnapOptions"):    
+      return
+    self._updatingSnapGUI = True
+    options = json.loads(self.parameterNode.GetParameter("SnapOptions"))
+    self.snapAutoApplyCheckBox.setChecked(options['AutoApply'] if 'AutoApply' in options else False)
+    self.snapModeComboBox.setCurrentText(options['Mode'] if 'Mode' in options else 'Last correction')
+    sourceImageNodeID = options['SourceID'] if 'SourceID' in options else ''
+    if not sourceImageNodeID and self.parameterNode.GetNodeReferenceID("ImageNode"):
+      sourceImageNodeID = self.parameterNode.GetNodeReferenceID("ImageNode")
+    self.snapSourceComboBox.setCurrentNodeID(sourceImageNodeID)
+    targetImageNodeID = options['TargetID'] if 'TargetID' in options else ''
+    if not targetImageNodeID and self.parameterNode.GetNodeReferenceID("TemplateNode"):
+      targetImageNodeID = self.parameterNode.GetNodeReferenceID("TemplateNode")
+    self.snapTargetComboBox.setCurrentNodeID(targetImageNodeID)
+    self._updatingSnapGUI = False
+
+  def onSnapTriggered(self):
+    snapMode = self.snapModeComboBox.currentText
+    sourceImageNodeID = self.snapSourceComboBox.currentNodeID
+    targetImageNodeID = self.snapTargetComboBox.currentNodeID
+    targetFiducialNodeID = self.targetFiducialNodeID
+    WarpDrive.WarpDriveLogic().runSnap(snapMode, sourceImageNodeID, targetImageNodeID, targetFiducialNodeID)
+
+  def modiableCorrectionsChanged(self, checked):
+    self.parameterNode.SetParameter("ModifiableCorrections",str(int(checked)))
